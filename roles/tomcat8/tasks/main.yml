@@ -1,0 +1,174 @@
+---
+# Disable SELinux
+- selinux:
+    policy: targeted 
+    state: permissive 
+
+# Copy--------- a new ------------
+- copy:
+    src="{{Path}}/roles/tomcat8/myfiles/apache-tomcat-8.0.41.tar.gz"
+    dest=/tmp/apache-tomcat-8.0.41.tar.gz
+    owner=root
+    group=root
+    mode=0777  
+
+- name: Extract tomcat
+  command: /bin/tar xzf /tmp/apache-tomcat-8.0.41.tar.gz -C /opt/ creates=/opt/apache-tomcat-8.0.41
+
+# copy extras files 
+- copy:
+    src="{{Path}}/roles/tomcat8/myfiles/extras/{{item.name}}"
+    dest=/opt/apache-tomcat-8.0.41/{{item.dir}}/
+    owner=root
+    group=root
+    mode=0777 
+  with_items:
+    - { name: catalina-jmx-remote.jar  , dir: lib }
+    - { name: catalina-ws.jar          , dir: lib }
+    - { name: tomcat-juli-adapters.jar , dir: lib }
+    - { name: tomcat-juli.jar          , dir: bin }
+
+- name: Remove docs apps
+  file: path=/opt/apache-tomcat-8.0.41/webapps/docs state=absent
+
+- name: Remove examples apps
+  file: path=/opt/apache-tomcat-8.0.41/webapps/examples state=absent
+
+- name: Remove logging.properties
+  file: path=/opt/apache-tomcat-8.0.41/conf/logging.properties state=absent
+
+- name: Add logback libralies
+  copy: src=tomcat/lib dest=/opt/apache-tomcat-8.0.41/
+
+
+- name: Add tomcat configuration files
+  copy: src=tomcat/conf/{{item}} dest=/opt/apache-tomcat-8.0.41/conf/{{item}}
+  with_items:
+    - logback.xml
+    - logback-access.xml
+
+- name: Remove home directory symlink
+  shell: rm -f /opt/tomcat removes=/opt/tomcat
+
+- name: Create home directory symlink (Temporary for useradd)
+  file: src=/opt/apache-tomcat-8.0.41 path=/opt/tomcat state=link
+
+- name: Create tomcat group
+  group: name=tomcat
+
+- name: Create tomcat user
+  user: name=tomcat group=tomcat home=/opt/tomcat
+
+- name: Add tomcat configuration files - templates
+  template: src=tomcat/conf/{{item}} dest=/opt/tomcat/conf/{{item}}
+    owner=tomcat
+    group=tomcat
+    mode=0766
+  with_items:
+    - server.xml
+    - tomcat-users.xml
+
+
+- name: Remove home directory symlink (again)
+  shell: rm -f /opt/tomcat removes=/opt/tomcat
+
+- name: Change tomcat directory permissions
+  file: path=/opt/apache-tomcat-8.0.41 owner=tomcat group=tomcat state=directory recurse=yes
+
+- name: Recreate home directory symlink
+  file: src=/opt/apache-tomcat-8.0.41 owner=tomcat group=tomcat path=/opt/tomcat state=link
+
+- name: reset the logs folder permission 
+  file: 
+    path: /opt/tomcat/logs
+    mode: u=rwx,g=rwx,o=rwx
+    recurse: yes
+
+- name: Add tomcat systemd unit file
+  copy: src=systemd/tomcat.service dest=/usr/lib/systemd/system/tomcat.service owner=root group=root
+
+
+- name: Copy java programm to working directory 
+  copy: src="{{Path}}/roles/tomcat8/myfiles/Pet.war"
+        dest=/opt/tomcat/webapps/ROOT/
+        owner=tomcat
+        group=tomcat
+
+- name: Jar Pet.war
+  sudo: true
+  sudo_user: tomcat
+  command: bash -lc "cd /opt/tomcat/webapps/ROOT/ && jar -xvf Pet.war" removes=/opt/tomcat/webapps/ROOT
+
+- name: Copy java programm to working directory
+  copy: src="{{Path}}/roles/tomcat8/myfiles/web.xml"
+        dest=/opt/tomcat/webapps/ROOT/WEB-INF/web.xml
+        owner=tomcat
+        group=tomcat
+        mode=0775
+
+- name: Fix the /opt/tomcat/conf permissions 
+  file: dest=/opt/tomcat/conf state=directory owner=tomcat group=tomcat mode=0775 recurse=yes   
+  become: yes
+  become_user: root
+
+- name: FixII  the /opt/tomcat/webapps  permissions
+  file: dest=/opt/tomcat/webapps state=directory owner=tomcat group=tomcat mode=0777 recurse=yes 
+  become: yes
+  become_user: root
+
+- name: FixIII  the /opt/tomcat/work  permissions
+  file: dest=/opt/tomcat/work state=directory owner=tomcat group=tomcat mode=0777 recurse=yes 
+  become: yes
+  become_user: root
+
+- name: FixIV  the /opt/tomcat/conf/Catalina  permissions
+  file: dest=/opt/tomcat/conf/Catalina/localhost/ state=directory owner=tomcat group=tomcat mode=0777 recurse=yes
+  become: yes
+  become_user: root
+
+- name: copy PetList.jsp
+  copy: src={{Path}}/roles/tomcat8/myfiles/PetList.jsp
+        dest=/opt/tomcat/webapps/ROOT/index.jsp
+        owner=tomcat
+        group=tomcat
+        mode=0755
+ 
+- name: systemd daemon-reload
+  command: systemctl daemon-reload
+
+- name: transfer the setenv to /opt/tomcat 
+  copy:
+    src: "{{Path}}/roles/tomcat8/myfiles/setenv.sh"
+    dest: /opt/tomcat/bin/setenv.sh
+    owner: tomcat
+    group: tomcat
+    mode: 755
+
+#  touch /opt/tomcat/logs/catalina.out
+- file: 
+    path: /opt/tomcat/logs/catalina.out
+    state: touch
+    mode: 0777  
+    owner: tomcat
+    group: tomcat
+
+- name: Install Tomcat init script
+  copy: src="{{Path}}/roles/tomcat8/myfiles/tomcat-initscript.sh" dest=/etc/init.d/tomcat mode=0755
+- name: Start Tomcat
+  service: name=tomcat state=started enabled=yes
+
+- name: restart tomcat 
+  service: name=tomcat state=restarted
+
+# - name: Add firewalld service file
+#  template: src=firewalld/tomcat.xml dest=/usr/lib/firewalld/services/tomcat.xml owner=root group=root
+
+# - name: Restart firewalld
+#  service: name=firewalld state=restarted enabled=yes
+
+# - name: Expose tomcat
+#   shell: firewall-cmd --add-service=tomcat --zone=public --permanent
+
+- name: Wait for tomcat started
+  wait_for: port="8088"
+

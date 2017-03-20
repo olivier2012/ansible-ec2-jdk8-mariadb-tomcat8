@@ -1,0 +1,57 @@
+---
+
+# copy files
+- copy: 
+    src="{{Path}}/roles/oracle-jdk8/myfiles/jdk-8u121-linux-x64.tar.gz"
+    dest=/tmp/jdk-8u121-linux-x64.tar.gz
+    owner=root
+    group=root
+    mode=0777
+
+- name: Extract oracle-jdk8 archive
+  command: tar xzf jdk-8u121-linux-x64.tar.gz -C /opt/ creates=/opt/jdk1.8.0_121 chdir=/tmp
+
+- name: Remove home directory symlink
+  shell: rm -f /opt/jdk removes=/opt/jdk
+
+- name: Create home directory symlink (Temporary for useradd)
+  file: src=/opt/jdk1.8.0_121 path=/opt/jdk state=link
+
+- name: Create tomcat group
+  group: name=tomcat
+
+
+- name: Create tomcat user
+  user: 
+    name: tomcat
+    group: tomcat
+
+- name: Remove home directory symlink (again)
+  shell: rm -f /opt/jdk removes=/opt/jdk
+
+- name: Change tomcat directory permissions
+  file: path=/opt/jdk1.8.0_121 owner=tomcat group=tomcat state=directory recurse=yes
+
+- name: Recreate home directory symlink
+  file: src=/opt/jdk1.8.0_121 owner=tomcat group=tomcat path=/opt/jdk state=link
+
+
+- name: alternatives --install
+  shell: alternatives --install /usr/bin/{{item}} {{item}} /opt/jdk/bin/{{item}} 2
+  with_items:
+    - java
+    - jar
+    - javac
+
+- name: alternatives --set
+  shell: alternatives --set {{item}} /opt/jdk/bin/{{item}}
+  with_items:
+    - java
+    - jar
+    - javac
+
+- name: Register /etc/profile
+  template: src=profile.d/java.sh dest=/etc/profile.d/java.sh owner=root group=root mode=0744
+
+- name: run the java.sh
+  shell: sh /etc/profile.d/java.sh removes=/etc/profile.d

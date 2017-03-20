@@ -1,0 +1,14 @@
+---
+# This playbook deploys a simple standalone Tomcat 7 server.
+
+- hosts: tomcat-servers
+  remote_user: ec2-user
+  become: yes
+  become_method: sudo
+  vars:
+   Path: "{{lookup('env','PWD')}}"
+
+  roles:
+    - oracle-jdk8
+    - mariadb
+    - tomcat8
